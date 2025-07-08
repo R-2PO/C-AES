@@ -133,6 +133,7 @@ unsigned short int inverse (unsigned short int a) {
 
 
 unsigned short int SBox (unsigned short int a) {
+    // The function I used to generate SBoxTable, not to be used as using the table is faster
     unsigned short int a_inv = inverse(a);
     short int b[8];
     short int r[8];
