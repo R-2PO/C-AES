@@ -376,6 +376,7 @@ void InvCipher (unsigned short int* in, short int Nr, expandedKey expKey, unsign
 
 
 
+// For all the ciphers defined below, resultLenth is a pointer to a variable that will be used as an output for the function and will contain the length of the output
 
 unsigned char* AESECBCipher (unsigned char* in, int length, unsigned short int* key, short int Nk, short int Nr, int* resultLength) {
     if (length%16 == 0) {*resultLength = length;}
