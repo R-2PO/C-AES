@@ -1,20 +1,53 @@
-#include "aes.c"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "modes.c"
 
 
+
 void main() {
-    unsigned char in[] = "This is a text to cipher.";
-    unsigned short int key[] = {0x2b,0x7e,0x15,0x16, 0x28,0xae,0xd2,0xa6, 0xab,0xf7,0x15,0x88, 0x09,0xcf,0x4f,0x3c, 0xdc,0x38,0xaf,0x1a, 0xc2,0x6f,0xdd,0x6a, 0xee,0xf9,0x87,0x9f, 0x19,0x2a,0xf,0xae};
-    unsigned char* out;
-    int resultLength;
-    out = AES256ECBCipher(in,25,key,&resultLength);
-    for (short int i=0; i<resultLength; i++) {
-        printf("%02x ",out[i]);
+    unsigned char in[] = "Some secret text ciphered with AES in GCM mode, which gives both security and data authentication.";
+    unsigned char additional[] = "Some additional data, that is not ciphered";
+    unsigned short int key[16] = {0xb3, 0x5e, 0xc, 0xf1, 0x82, 0x49, 0xf6, 0x2f, 0x36, 0x10, 0x7c, 0x5c, 0xd8, 0xc7, 0x12, 0xa6};
+    GCMBlock IV = {.val = {0x00, 0x00, 0x00, 0x00, 0x23, 0x9b, 0xcf, 0xe2, 0x3c, 0xb8, 0xe9, 0xab, 0x20, 0x73, 0x5f, 0x4}, .len = 96};
+    unsigned char tag[16];
+    unsigned char* ciphered;
+    unsigned char* deciphered;
+    unsigned long long int resultLength;
+    unsigned char success;
+
+
+    ciphered = AESGCMCipher(in, 98, additional, 42, IV, key, tag, 128, &resultLength);
+
+    printf("Ciphered data:\n");
+    for (unsigned long long int i=0; i<resultLength; i++) {
+        printf("%02x ", ciphered[i]);
     }
-    printf("\n");
-    out = AES256ECBInvCipher(out,resultLength,key,&resultLength);
-    for (short int i=0; i<resultLength; i++) {
-        printf("%c",out[i]);
+
+    printf("\n\nTag: ");
+    for (unsigned short int i=0; i<16; i++) {
+        printf("%02x ", tag[i]);
     }
-    printf("\n");
+
+
+
+    // Uncomment the next line to change the data, making the authentication fail
+    // ciphered[0] = 0;
+
+
+    deciphered = AESGCMInvCipherAndAuthenticate(ciphered, resultLength, additional, 42, IV, key, tag, 128, &success, &resultLength);
+
+    printf("\n\n\nDeciphered data:\n");
+
+    if (success) {
+        printf("Plaintext: ");
+        for (unsigned long long int i=0; i<resultLength; i++) {
+            printf("%c", deciphered[i]);
+        }
+        printf("\n");
+    }
+    else {
+        printf("FAILED TO AUTHENTICATE DATA\n");
+    }
 }
