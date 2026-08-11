@@ -478,7 +478,7 @@ unsigned char* AESGCMGetTag (unsigned char* T, GCMBlock* ABlocks, unsigned long 
     // Only get the tag
 
     GCMBlock S;
-    GCMBlock* SInter; // The intermediate list of GCMBlocks for obtaining S
+    GCMBlock SInter[p]; // The intermediate list of GCMBlocks for obtaining S
     GCMBlock* TInter; // The same thing, but for T
     GCMBlock zero = {.val = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, .len = 128}; // To be used for concatenating
     
@@ -486,8 +486,6 @@ unsigned char* AESGCMGetTag (unsigned char* T, GCMBlock* ABlocks, unsigned long 
 
 
 
-    // Build S
-    SInter = (GCMBlock *)malloc(sizeof(GCMBlock)*(p));
     // The first m-1 blocks of ABlocks are full, we can just add them
     for (unsigned long long int i=0; i<m-1; i++) {
         SInter[i] = ABlocks[i];
@@ -533,6 +531,8 @@ unsigned char* AESGCMGetTag (unsigned char* T, GCMBlock* ABlocks, unsigned long 
     for (unsigned short int i=0; i<tagLen; i++) {
         T[i] = TInter[0].val[(16-tagLen)+i];
     }
+
+    free(TInter);
 }
 
 
@@ -578,6 +578,12 @@ unsigned char* AESGCMCipher (unsigned char* P, unsigned long long int PLen, unsi
     AESGCMGetTag(T, ABlocks, AbLen, CBlocks, CbLen, J0, expKey, H, tagLen, m, n, u, v, p);
  
     *resultLen = PLen;
+
+
+    // Free some memory
+    free(ABlocks);
+    free(CBlocks);
+    free(PBlocks);
 
     return C;
 }
@@ -646,6 +652,12 @@ unsigned char* AESGCMInvCipherAndAuthenticate (unsigned char* C, unsigned long l
             *success = 0;
         }
     }
+
+
+    // Free some memory
+    free(ABlocks);
+    free(CBlocks);
+    free(PBlocks);
 
     return P;
 }
