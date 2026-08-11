@@ -340,45 +340,27 @@ GCMBlock* GCMGCTRAES (GCMBlock* X, GCMBlock ICB, unsigned long long int n, expan
 
 // Now for the hardest part...
 
-// TODO: Put all the identical code for Cipher and InvCipher in a separate function
 
-unsigned char* AESGCMCipher (unsigned char* P, unsigned long long int PLen, unsigned char* A, unsigned long long int ALen, GCMBlock IV, unsigned short int* key, unsigned char* T, unsigned short int tagbLen, unsigned long long int* resultLen) {
-    // Performs an AES cipher in GCM mode
-    // P is the plaintext to cipher, of length in bytes PLen
-    // A is the additional authenticated data, of length in bytes ALen
-    // IV is the initialization vector, must be 96 bits long, as recommended by NIST SP800-38D
-    // key is the key used for the cipher
-    // T is a pointer to the variable where the tag will be stored
-    // tagbLen is the length of the tag in bits, and should be either 128, 120, 112, 104 or 96
-    // resultLen is the pointer where the length of the result will be stored (in bytes)
-    //
-    // Returns the cipher
+
+unsigned char* AESGCMGetCipheredData (unsigned char* P, unsigned long long int PLen, unsigned char* A, unsigned long long int ALen, GCMBlock IV, expandedKey expKey, GCMBlock* HVar, GCMBlock* J0Var, GCMBlock** PBlocksVar, GCMBlock** ABlocksVar, GCMBlock** CBlocksVar, unsigned long long int* mVar, unsigned long long int* nVar) {
+    // Perform just the first part of the cipher/decipher algorithms
+    // H is zero ciphered once
 
     unsigned short int HIn[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; // The input for the first cipher
     unsigned short int HOut[16]; // The output for the first cipher
 
     GCMBlock H;
     GCMBlock J0;
-    GCMBlock S;
+    GCMBlock one = {.val = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, .len = 32}; // To be used when initializing J0
     GCMBlock* ABlocks;
     GCMBlock* CBlocks;
     GCMBlock* PBlocks;
-    GCMBlock* SInter; // The intermediate list of GCMBlocks for obtaining S
-    GCMBlock* TInter; // The same thing, but for T
-    GCMBlock one = {.val = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, .len = 32}; // To be used when initializing J0
-    GCMBlock zero = {.val = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, .len = 128}; // To be used for concatenating
 
-    unsigned long long int m; // The number of GCMBlocks necessary to store A
-    unsigned long long int n; // The number of GCMBlocks necessary to store P
-    unsigned long long int p; // The number of GCMBlocks necessary to store SInter
-    unsigned long long int u;
-    unsigned long long int v;
-    unsigned long long int CbLen = PLen*8; // The bit length of C, which is the same as the bit length of P
-    unsigned long long int AbLen = ALen*8; // The bit length of A
-    unsigned long long int mask;
+    unsigned long long int n;
+    unsigned long long int m;
 
-    unsigned char tagLen = tagbLen/8;
     unsigned char* C;
+
 
     // Convert P to a list of GCMBlocks
     n = PLen / 16;
@@ -445,7 +427,6 @@ unsigned char* AESGCMCipher (unsigned char* P, unsigned long long int PLen, unsi
 
 
 
-    expandedKey expKey = KeyExpansion(key,4,10);
 
     // Initialize H
     Cipher(HIn, 10, expKey, HOut);
@@ -456,17 +437,53 @@ unsigned char* AESGCMCipher (unsigned char* P, unsigned long long int PLen, unsi
     }
     H.len = 128;
 
+
     // Initialize J0
     J0 = GCMConcatenate(IV, one);
 
     CBlocks = GCMGCTRAES(PBlocks,GCMInc(J0,32),n,expKey);
 
-    u = 128*n - CbLen;
 
-    v = 128*m - AbLen;
 
-    p = (AbLen + v + CbLen + u + 128)/128; // S is necessarily a whole number of blocks
+    // Convert C from GCMBlocks
+    C = (unsigned char *)malloc(sizeof(unsigned char)*(PLen));
+
+    // The n-1 first blocks pose no problem as they are full
+    for (unsigned long long int i=0; i<n-1; i++) {
+        for (unsigned char j=0; j<16; j++) {
+            C[i*16+j] = CBlocks[i].val[j];
+        }
+    }
+
+    // Get the bytes from the last block
+    for (unsigned char i=0; i<PLen%16; i++) {
+        C[(n-1)*16+i] = CBlocks[n-1].val[(16-PLen%16)+i];
+    }
+
+
+    *HVar = H;
+    *J0Var = J0;
+    *mVar = m;
+    *nVar = n;
+    *ABlocksVar = ABlocks;
+    *CBlocksVar = CBlocks;
+    *PBlocksVar = PBlocks;
+
+    return C;
+}
+
+
+
+unsigned char* AESGCMGetTag (unsigned char* T, GCMBlock* ABlocks, unsigned long long int AbLen, GCMBlock* CBlocks, unsigned long long int CbLen, GCMBlock J0, expandedKey expKey, GCMBlock H, unsigned char tagLen, unsigned long long int m, unsigned long long int n, unsigned long long int u, unsigned long long int v, unsigned long long int p) {
+    // Only get the tag
+
+    GCMBlock S;
+    GCMBlock* SInter; // The intermediate list of GCMBlocks for obtaining S
+    GCMBlock* TInter; // The same thing, but for T
+    GCMBlock zero = {.val = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, .len = 128}; // To be used for concatenating
     
+    unsigned long long int mask;
+
 
 
     // Build S
@@ -516,24 +533,51 @@ unsigned char* AESGCMCipher (unsigned char* P, unsigned long long int PLen, unsi
     for (unsigned short int i=0; i<tagLen; i++) {
         T[i] = TInter[0].val[(16-tagLen)+i];
     }
+}
+
+
+
+
+unsigned char* AESGCMCipher (unsigned char* P, unsigned long long int PLen, unsigned char* A, unsigned long long int ALen, GCMBlock IV, unsigned short int* key, unsigned char* T, unsigned short int tagbLen, unsigned long long int* resultLen) {
+    // Performs an AES cipher in GCM mode
+    // P is the plaintext to cipher, of length in bytes PLen
+    // A is the additional authenticated data, of length in bytes ALen
+    // IV is the initialization vector, must be 96 bits long, as recommended by NIST SP800-38D
+    // key is the key used for the cipher
+    // T is a pointer to the variable where the tag will be stored
+    // tagbLen is the length of the tag in bits, and should be either 128, 120, 112, 104 or 96
+    // resultLen is the pointer where the length of the result will be stored (in bytes)
+    //
+    // Returns the cipher
+
+    GCMBlock H;
+    GCMBlock J0;
+    GCMBlock* ABlocks;
+    GCMBlock* CBlocks;
+    GCMBlock* PBlocks;
+
+    unsigned long long int m; // The number of GCMBlocks necessary to store A
+    unsigned long long int n; // The number of GCMBlocks necessary to store P
+    unsigned long long int p; // The number of GCMBlocks necessary to store SInter
+    unsigned long long int u;
+    unsigned long long int v;
+    unsigned long long int CbLen = PLen*8; // The bit length of C, which is the same as the bit length of P
+    unsigned long long int AbLen = ALen*8; // The bit length of A
+
+    unsigned char tagLen = tagbLen/8;
+    unsigned char* C;
+
+    expandedKey expKey = KeyExpansion(key,4,10);
     
+    C = AESGCMGetCipheredData(P, PLen, A, ALen, IV, expKey, &H, &J0, &PBlocks, &ABlocks, &CBlocks, &m, &n);
+    
+    u = 128*n - CbLen;
+    v = 128*m - AbLen;
+    p = (AbLen + v + CbLen + u + 128)/128; // S is necessarily a whole number of blocks
+
+    AESGCMGetTag(T, ABlocks, AbLen, CBlocks, CbLen, J0, expKey, H, tagLen, m, n, u, v, p);
+ 
     *resultLen = PLen;
-
-
-    // Convert C from GCMBlocks
-    C = (unsigned char *)malloc(sizeof(unsigned char)*(PLen));
-
-    // The n-1 first blocks pose no problem as they are full
-    for (unsigned long long int i=0; i<n-1; i++) {
-        for (unsigned char j=0; j<16; j++) {
-            C[i*16+j] = CBlocks[i].val[j];
-        }
-    }
-
-    // Get the bytes from the last block
-    for (unsigned char i=0; i<PLen%16; i++) {
-        C[(n-1)*16+i] = CBlocks[n-1].val[(16-PLen%16)+i];
-    }
 
     return C;
 }
@@ -555,19 +599,11 @@ unsigned char* AESGCMInvCipherAndAuthenticate (unsigned char* C, unsigned long l
     //
     // returns the cipher
     
-    unsigned short int HIn[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; // The input for the first cipher
-    unsigned short int HOut[16]; // The output for the first cipher
-
     GCMBlock H;
     GCMBlock J0;
-    GCMBlock S;
     GCMBlock* ABlocks;
     GCMBlock* CBlocks;
     GCMBlock* PBlocks;
-    GCMBlock* SInter; // The intermediate list of GCMBlocks for obtaining S
-    GCMBlock* TInter; // The same thing, but for T
-    GCMBlock one = {.val = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, .len = 32}; // To be used when initializing J0
-    GCMBlock zero = {.val = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, .len = 128}; // To be used for concatenating
 
     unsigned long long int m; // The numebr of GCMBlocks necessary to store A
     unsigned long long int n; // The number of GCMBlocks necessary to store C
@@ -576,12 +612,12 @@ unsigned char* AESGCMInvCipherAndAuthenticate (unsigned char* C, unsigned long l
     unsigned long long int v;
     unsigned long long int CbLen = CLen*8; // The bit length of C, which is the same as the bit length of P
     unsigned long long int AbLen = ALen*8; // The bit length of A
-    unsigned long long int mask;
     unsigned char tagLen = tagbLen/8;
 
     unsigned char* P;
-    unsigned char* newT; // The new tag
+    unsigned char newT[tagLen]; // The new tag
 
+    // Check if the tag length is supported
     if (tagbLen%8 != 0 || tagbLen < 96 || tagbLen > 128) {
         *success = 0;
         *resultLen = 0;
@@ -591,148 +627,16 @@ unsigned char* AESGCMInvCipherAndAuthenticate (unsigned char* C, unsigned long l
     }
 
 
-    // Convert C to a list of GCMBlocks
-    n = CLen / 16;
-    if (CLen%16 != 0) {
-        n++;
-    }
-
-    CBlocks = (GCMBlock *)malloc(sizeof(GCMBlock)*(n));
-
-    for (unsigned long long int i=0; i<n-1; i++) {
-        for (unsigned char j=0; j<16; j++) {
-            CBlocks[i].val[j] = C[i*16+j];
-        }
-
-        // Set the length of the i-th block
-        CBlocks[i].len = 128;
-    }
-
-    if (CLen%16 == 0) {
-        for (unsigned char j=0; j<16; j++) {
-            CBlocks[n-1].val[j] = C[(n-1)*16 + j];
-        }
-        CBlocks[n-1].len = 128;
-    }
-    else {
-        for (unsigned char j=0; j<CLen%16; j++) {
-            CBlocks[n-1].val[16-(CLen%16)+j] = C[(n-1)*16+j];
-        }
-        CBlocks[n-1].len = (CLen%16)*8;
-    }
-
-
-
-
-    // Convert A to a list of GCMBlocks
-    m = ALen / 16;
-    if (ALen%16 != 0) {
-        m++;
-    }
-
-    ABlocks = (GCMBlock *)malloc(sizeof(GCMBlock)*(m));
-
-    for (unsigned long long int i=0; i<m-1; i++) {
-        for (unsigned char j=0; j<16; j++) {
-            ABlocks[i].val[j] = A[i*16+j];
-        }
-
-        // Set the length of the i-th block
-        ABlocks[i].len = 128;
-    }
-
-    if (ALen%16 == 0) {
-        for (unsigned char j=0; j<16; j++) {
-            ABlocks[m-1].val[j] = A[(m-1)*16 + j];
-        }
-        ABlocks[m-1].len = 128;
-    }
-    else {
-        for (unsigned char j=0; j<ALen%16; j++) {
-            ABlocks[m-1].val[16-(ALen%16)+j] = A[(m-1)*16+j];
-        }
-        ABlocks[m-1].len = (ALen%16)*8;
-    }
-
-
-
-
     expandedKey expKey = KeyExpansion(key,4,10);
 
-    // Initialize H
-    Cipher(HIn, 10, expKey, HOut);
-    
-    // Convert HOut into a GCMBlock
-    for (unsigned char i=0; i<16; i++) {
-        H.val[i] = HOut[i];
-    }
-    H.len = 128;
-
-    // Initialize J0
-    J0 = GCMConcatenate(IV, one);
-
-    PBlocks = GCMGCTRAES(CBlocks,GCMInc(J0,32),n,expKey);
+    P = AESGCMGetCipheredData(C, CLen, A, ALen, IV, expKey, &H, &J0, &CBlocks, &ABlocks, &PBlocks, &m, &n);
 
     u = 128*n - CbLen;
-
     v = 128*m - AbLen;
-
     p = (AbLen + v + CbLen + u + 128)/128; // S is necessarily a whole number of blocks
 
+    AESGCMGetTag(newT, ABlocks, AbLen, CBlocks, CbLen, J0, expKey, H, tagLen, m, n, u, v, p);
 
-
-
-    // Build S
-    SInter = (GCMBlock *)malloc(sizeof(GCMBlock)*(p));
-    // The first m-1 blocks of ABlocks are full, we can just add them
-    for (unsigned long long int i=0; i<m-1; i++) {
-        SInter[i] = ABlocks[i];
-    }
-    // Then we can shift the last block of ABlocks by concatenating it with the right amount of zeros
-    if (ABlocks[m-1].len != 128) {
-        zero.len = 128-ABlocks[m-1].len;
-        SInter[m-1] = GCMConcatenate(ABlocks[m-1],zero);
-    }
-    else {
-        SInter[m-1] = ABlocks[m-1];
-    }
-
-    // The first n-1 blocks of CBlocks are full, we can just add them
-    for (unsigned long long int i=0; i<n-1; i++) {
-        SInter[m+i] = CBlocks[i];
-    }
-    // Then we can shift the last block of ABlocks by concatenating it with the right amount of zeros
-    if (CBlocks[n-1].len != 128) {
-        zero.len = 128-CBlocks[n-1].len;
-        SInter[m+n-1] = GCMConcatenate(CBlocks[n-1],zero);
-    }
-    else {
-        SInter[m+n-1] = CBlocks[n-1];
-    }
-
-    // Add AbLen
-    mask = 0xff;
-    for (unsigned char i=0; i<8; i++) {
-        SInter[p-1].val[7-i] = (AbLen >> 8*i) & mask;
-    }
-
-    // Add CbLen
-    for (unsigned char i=0; i<8; i++) {
-        SInter[p-1].val[15-i] = (CbLen >> 8*i) & mask;
-    }
-    SInter[p-1].len = 128;
-
-    S = GCMGHASH(SInter, p, H);
-
-    TInter = GCMGCTRAES(&S,J0,1,expKey);
-
-    // Allocate memory to store the new tag
-    newT = (unsigned char *)malloc(sizeof(unsigned char)*(tagLen));
-
-    for (unsigned short int i=0; i<tagLen; i++) {
-        newT[i] = TInter[0].val[(16-tagLen)+i];
-    }
-    
     *resultLen = CLen;
     *success = 1;
 
@@ -741,21 +645,6 @@ unsigned char* AESGCMInvCipherAndAuthenticate (unsigned char* C, unsigned long l
             // The two tags are not equal, authentication fails
             *success = 0;
         }
-    }
-
-    // Convert P from GCMBlocks
-    P = (unsigned char *)malloc(sizeof(unsigned char)*(CLen));
-
-    // The n-1 first blocks pose no problem as they are full
-    for (unsigned long long int i=0; i<n-1; i++) {
-        for (unsigned char j=0; j<16; j++) {
-            P[i*16+j] = PBlocks[i].val[j];
-        }
-    }
-
-    // Get the bytes from the last block
-    for (unsigned char i=0; i<CLen%16; i++) {
-        P[(n-1)*16+i] = PBlocks[n-1].val[(16-CLen%16)+i];
     }
 
     return P;
